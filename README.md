@@ -35,3 +35,26 @@ The module implements several security measures for certificate handling:
    - /etc/eventstore/certs/ca: 700 (owner read/write/execute only)
 4. All certificate files are owned by the eventstore user
 5. CA certificate is automatically added to the system's trusted certificates
+
+## IP Access List Module Usage Example
+
+```
+module "my_ip_access_list" {
+  source = "./modules/ip_access_list"
+
+  name = "my-access-list"
+  vpc_id = aws_vpc.eventstore_vpc.id
+  from_port = 2113
+  to_port = 2113
+  protocol = "tcp"
+  addresses = [
+    {
+      cidr        = "134.56.254.123/32"
+      description = "Yordis Prieto's IP Address"
+    },
+    {
+      cidr        = "203.0.113.0/24"
+      description = "Office Network"
+    }
+  ]
+}
