@@ -54,19 +54,33 @@ systemctl start amazon-cloudwatch-agent
 
 # Format and mount data volume
 echo "Setting up data volume..."
-mkfs.ext4 /dev/xvdf
+# Find the first available block device that's not mounted and not the root device
+DATA_DEV=$(lsblk -o NAME,MOUNTPOINT | grep -vE "boot|/" | awk '{print "/dev/"$1}' | head -n 1)
+if [ -z "$DATA_DEV" ]; then
+    echo "Error: Could not find data device"
+    exit 1
+fi
+echo "Using data device: $DATA_DEV"
+mkfs.ext4 "$DATA_DEV"
 mkdir -p /var/lib/eventstore/data
-mount /dev/xvdf /var/lib/eventstore/data
+mount "$DATA_DEV" /var/lib/eventstore/data
 
 # Format and mount index volume
 echo "Setting up index volume..."
-mkfs.ext4 /dev/xvdg
+# Find the second available block device that's not mounted and not the root device
+INDEX_DEV=$(lsblk -o NAME,MOUNTPOINT | grep -vE "boot|/" | awk '{print "/dev/"$1}' | tail -n 1)
+if [ -z "$INDEX_DEV" ]; then
+    echo "Error: Could not find index device"
+    exit 1
+fi
+echo "Using index device: $INDEX_DEV"
+mkfs.ext4 "$INDEX_DEV"
 mkdir -p /var/lib/eventstore/index
-mount /dev/xvdg /var/lib/eventstore/index
+mount "$INDEX_DEV" /var/lib/eventstore/index
 
 echo "Configuring fstab..."
-echo "/dev/xvdf /var/lib/eventstore/data ext4 defaults,nofail 0 2" >> /etc/fstab
-echo "/dev/xvdg /var/lib/eventstore/index ext4 defaults,nofail 0 2" >> /etc/fstab
+echo "$DATA_DEV /var/lib/eventstore/data ext4 defaults,nofail 0 2" >> /etc/fstab
+echo "$INDEX_DEV /var/lib/eventstore/index ext4 defaults,nofail 0 2" >> /etc/fstab
 
 # Write config
 echo "Writing EventStoreDB configuration..."
