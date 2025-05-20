@@ -85,6 +85,11 @@ data "aws_ami" "ubuntu" {
     name   = "virtualization-type"
     values = ["hvm"]
   }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
 }
 
 # Get current region and account info
@@ -274,6 +279,13 @@ resource "aws_instance" "eventstore" {
   key_name                    = var.key_pair_name
   vpc_security_group_ids      = [aws_security_group.eventstore_sg.id]
   iam_instance_profile        = aws_iam_instance_profile.eventstore_profile.name
+  disable_api_termination     = true
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
 
   depends_on = [
     aws_volume_attachment.data_attach[count.index],
@@ -575,11 +587,11 @@ resource "aws_cloudwatch_metric_alarm" "cpu_usage" {
 }
 
 output "cluster_node_ips" {
-  value = aws_autoscaling_group.eventstore.instances[*].private_ip
+  value = [for i in aws_instance.eventstore : i.private_ip]
 }
 
 output "node_dns_names" {
-  value = aws_autoscaling_group.eventstore.instances[*].private_dns
+  value = [for i in aws_instance.eventstore : i.private_dns]
 }
 
 output "gossip_seeds" {

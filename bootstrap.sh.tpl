@@ -61,6 +61,11 @@ if [ -z "$DATA_DEV" ]; then
     exit 1
 fi
 echo "Using data device: $DATA_DEV"
+# Wait for device to be available
+until [ -b "$DATA_DEV" ]; do 
+    echo "Waiting for data device $DATA_DEV to be available..."
+    sleep 1
+done
 mkfs.ext4 "$DATA_DEV"
 mkdir -p /var/lib/eventstore/data
 mount "$DATA_DEV" /var/lib/eventstore/data
@@ -74,6 +79,11 @@ if [ -z "$INDEX_DEV" ]; then
     exit 1
 fi
 echo "Using index device: $INDEX_DEV"
+# Wait for device to be available
+until [ -b "$INDEX_DEV" ]; do 
+    echo "Waiting for index device $INDEX_DEV to be available..."
+    sleep 1
+done
 mkfs.ext4 "$INDEX_DEV"
 mkdir -p /var/lib/eventstore/index
 mount "$INDEX_DEV" /var/lib/eventstore/index
