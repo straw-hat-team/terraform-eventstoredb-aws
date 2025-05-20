@@ -181,6 +181,19 @@ resource "aws_subnet" "eventstore_subnet" {
   tags                    = merge(local.common_tags, { Name = "eventstore-subnet" })
 }
 
+module "admin_ip_access_list" {
+  source   = "./modules/ip_access_list"
+  name     = "eventstore-admin-access"
+  vpc_id   = aws_vpc.eventstore_vpc.id
+  from_port = 2113
+  to_port   = 2113
+  protocol  = "tcp"
+  addresses = [for ip in var.bastion_ips : {
+    cidr        = ip
+    description = "Bastion or admin access"
+  }]
+}
+
 resource "aws_security_group" "eventstore_sg" {
   name        = "eventstore-sg"
   vpc_id      = aws_vpc.eventstore_vpc.id
@@ -195,16 +208,22 @@ resource "aws_security_group" "eventstore_sg" {
     description = "Internal gRPC communication between EventStoreDB nodes"
   }
 
-  # Admin interface access
+  # Admin interface access from VPC
   ingress {
     from_port   = 2113
     to_port     = 2113
     protocol    = "tcp"
-    cidr_blocks = concat(
-      [aws_vpc.eventstore_vpc.cidr_block],
-      var.bastion_ips
-    )
-    description = "Admin interface access from VPC and bastion hosts"
+    cidr_blocks = [aws_vpc.eventstore_vpc.cidr_block]
+    description = "Admin interface access from VPC"
+  }
+
+  # Admin interface access from bastion/admin IPs (via module)
+  ingress {
+    from_port         = 2113
+    to_port           = 2113
+    protocol          = "tcp"
+    security_groups   = [module.admin_ip_access_list.security_group_id]
+    description       = "Admin interface access from bastion/admin IPs"
   }
 
   egress {
