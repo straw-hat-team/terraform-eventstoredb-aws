@@ -139,52 +139,18 @@ data "aws_ssm_parameter" "ca_pem" {
 
 # VPC & Networking
 
-resource "aws_internet_gateway" "eventstore_igw" {
-  count  = var.network_type == "public" ? 1 : 0
-  vpc_id = aws_vpc.eventstore_vpc.id
-
-  tags = {
-    Name = "eventstore-igw"
-  }
-}
-
-resource "aws_route_table" "eventstore_rt" {
-  count  = var.network_type == "public" ? 1 : 0
-  vpc_id = aws_vpc.eventstore_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.eventstore_igw[0].id
-  }
-
-  tags = {
-    Name = "eventstore-rt"
-  }
-}
-
-resource "aws_route_table_association" "eventstore_rta" {
-  count          = var.network_type == "public" ? 1 : 0
-  subnet_id      = aws_subnet.eventstore_subnet.id
-  route_table_id = aws_route_table.eventstore_rt[0].id
-}
-
-resource "aws_vpc" "eventstore_vpc" {
+module "network" {
+  source     = "./modules/network"
+  name       = "eventstore-vpc"
   cidr_block = "172.28.0.0/16"
-  tags       = merge(local.common_tags, { Name = "eventstore-vpc" })
-}
-
-resource "aws_subnet" "eventstore_subnet" {
-  vpc_id                  = aws_vpc.eventstore_vpc.id
-  cidr_block              = "172.28.1.0/24"
-  availability_zone       = local.az
-  map_public_ip_on_launch = var.network_type == "public"
-  tags                    = merge(local.common_tags, { Name = "eventstore-subnet" })
+  public     = var.network_type == "public"
+  tags       = local.common_tags
 }
 
 module "admin_ip_access_list" {
   source   = "./modules/ip_access_list"
   name     = "eventstore-admin-access"
-  vpc_id   = aws_vpc.eventstore_vpc.id
+  vpc_id   = module.network.vpc_id
   from_port = 2113
   to_port   = 2113
   protocol  = "tcp"
@@ -196,7 +162,7 @@ module "admin_ip_access_list" {
 
 resource "aws_security_group" "eventstore_sg" {
   name        = "eventstore-sg"
-  vpc_id      = aws_vpc.eventstore_vpc.id
+  vpc_id      = module.network.vpc_id
   tags        = merge(local.common_tags, { Name = "eventstore-sg" })
 
   # Internal gRPC communication between nodes
@@ -204,7 +170,7 @@ resource "aws_security_group" "eventstore_sg" {
     from_port   = 1113
     to_port     = 1113
     protocol    = "tcp"
-    cidr_blocks = [aws_vpc.eventstore_vpc.cidr_block]
+    cidr_blocks = [module.network.vpc_cidr]
     description = "Internal gRPC communication between EventStoreDB nodes"
   }
 
@@ -213,7 +179,7 @@ resource "aws_security_group" "eventstore_sg" {
     from_port   = 2113
     to_port     = 2113
     protocol    = "tcp"
-    cidr_blocks = [aws_vpc.eventstore_vpc.cidr_block]
+    cidr_blocks = [module.network.vpc_cidr]
     description = "Admin interface access from VPC"
   }
 
@@ -320,7 +286,7 @@ resource "aws_instance" "eventstore" {
 
   ami                         = local.ami_id
   instance_type               = "t3.medium"
-  subnet_id                   = aws_subnet.eventstore_subnet.id
+  subnet_id                   = module.network.subnet_id
   associate_public_ip_address = var.network_type == "public"
   key_name                    = var.key_pair_name
   vpc_security_group_ids      = [aws_security_group.eventstore_sg.id]

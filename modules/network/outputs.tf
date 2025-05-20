@@ -12,4 +12,8 @@ output "internet_gateway_id" {
 
 output "route_table_id" {
   value = var.public ? aws_route_table.this[0].id : null
+}
+
+output "vpc_cidr" {
+  value = aws_vpc.this.cidr_block
 } 
