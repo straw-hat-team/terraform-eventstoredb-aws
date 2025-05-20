@@ -2,10 +2,21 @@ variable "aws_region" {
   default = "us-east-1"
 }
 
+variable "environment" {
+  description = "Environment name (e.g., dev, prod)"
+  type        = string
+}
+
+variable "cluster_size" {
+  description = "Number of nodes in the EventStoreDB cluster"
+  type        = number
+  default     = 3
+}
+
 source "amazon-ebs" "esdb" {
   region                  = var.aws_region
   instance_type           = "t3.medium"
-  ami_name                = "eventstore-custom-{{timestamp}}"
+  ami_name                = "eventstore-${var.environment}-{{timestamp}}"
   source_ami_filter {
     filters = {
       name                = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
@@ -31,6 +42,18 @@ build {
       "sudo systemctl stop eventstore",
       "sudo cloud-init clean",
       "sudo rm -rf /var/lib/cloud/*"
+    ]
+  }
+
+  provisioner "file" {
+    source      = "bootstrap.sh.tpl"
+    destination = "/tmp/bootstrap.sh"
+  }
+
+  provisioner "shell" {
+    inline = [
+      "chmod +x /tmp/bootstrap.sh",
+      "sudo mv /tmp/bootstrap.sh /usr/local/bin/bootstrap.sh"
     ]
   }
 }

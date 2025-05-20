@@ -234,7 +234,12 @@ resource "aws_iam_policy" "eventstore_policy" {
         Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/eventstore/*"
       },
       {
-        Action = ["cloudwatch:PutMetricData"],
+        Action = [
+          "cloudwatch:PutMetricData",
+          "cloudwatch:PutMetricAlarm",
+          "cloudwatch:DeleteAlarms",
+          "cloudwatch:DescribeAlarms"
+        ],
         Effect = "Allow",
         Resource = "*"
       },
@@ -284,7 +289,7 @@ resource "aws_instance" "eventstore" {
   count = var.cluster_size
 
   ami                         = local.ami_id
-  instance_type               = "m6i.large"
+  instance_type               = "t3.medium"
   subnet_id                   = aws_subnet.eventstore_subnet.id
   associate_public_ip_address = var.network_type == "public"
   key_name                    = var.key_pair_name
@@ -316,6 +321,7 @@ resource "aws_instance" "eventstore" {
     cert_text   = data.aws_ssm_parameter.cert_pem.value
     key_text    = data.aws_ssm_parameter.key_pem.value
     environment = var.environment
+    cluster_size = var.cluster_size
   })
 
   tags = merge(local.common_tags, {

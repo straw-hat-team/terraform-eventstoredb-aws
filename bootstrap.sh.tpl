@@ -13,6 +13,22 @@ exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 echo "Starting EventStoreDB node bootstrap script"
 set -e
 
+# Validate required environment variables
+if [ -z "${environment}" ]; then
+  echo "Error: environment variable is required"
+  exit 1
+fi
+
+if [ -z "${node_ip}" ]; then
+  echo "Error: node_ip variable is required"
+  exit 1
+fi
+
+if [ -z "${peer_ips}" ]; then
+  echo "Error: peer_ips variable is required"
+  exit 1
+fi
+
 # Install CloudWatch Agent
 echo "Installing CloudWatch Agent..."
 apt-get update -y
@@ -117,25 +133,42 @@ echo "$INDEX_DEV /var/lib/eventstore/index ext4 defaults,nofail 0 2" >> /etc/fst
 echo "Writing EventStoreDB configuration..."
 mkdir -p /etc/eventstore /etc/eventstore/certs
 
+# Default EventStoreDB configuration if not provided
+if [ -z "${config_text}" ]; then
+  config_text="RunProjections: All
+StartStandardProjections: true
+EnableAtomPubOverHTTP: true
+EnableExternalTCP: true
+EnableInternalTCP: true
+HttpPort: 2113
+ExternalTcpPort: 1113
+InternalTcpPort: 1112
+GossipPort: 2112"
+fi
+
 cat <<EOF > /etc/eventstore/eventstore.conf
 ${config_text}
 IntIp: ${node_ip}
 ExtIp: ${node_ip}
-ClusterSize: ${var.cluster_size}
+ClusterSize: ${cluster_size:-3}
 GossipSeed: [${peer_ips}]
 Db: /var/lib/eventstore/data
 Index: /var/lib/eventstore/index
 EOF
 
-cat <<EOF > /etc/eventstore/certs/cert.pem
+# Handle SSL certificates if provided
+if [ ! -z "${cert_text}" ] && [ ! -z "${key_text}" ]; then
+  echo "Configuring SSL certificates..."
+  cat <<EOF > /etc/eventstore/certs/cert.pem
 ${cert_text}
 EOF
 
-cat <<EOF > /etc/eventstore/certs/key.pem
+  cat <<EOF > /etc/eventstore/certs/key.pem
 ${key_text}
 EOF
 
-chmod 600 /etc/eventstore/certs/key.pem
+  chmod 600 /etc/eventstore/certs/key.pem
+fi
 
 # Enable and start EventStoreDB
 echo "Enabling and starting EventStoreDB service..."
