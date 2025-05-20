@@ -126,6 +126,11 @@ data "aws_ssm_parameter" "key_pem" {
   with_decryption = true
 }
 
+data "aws_ssm_parameter" "ca_pem" {
+  name            = "/eventstore/ca.pem"
+  with_decryption = true
+}
+
 # VPC & Networking
 
 resource "aws_internet_gateway" "eventstore_igw" {
@@ -320,6 +325,7 @@ resource "aws_instance" "eventstore" {
     config_text = data.aws_ssm_parameter.eventstore_conf.value
     cert_text   = data.aws_ssm_parameter.cert_pem.value
     key_text    = data.aws_ssm_parameter.key_pem.value
+    ca_text     = data.aws_ssm_parameter.ca_pem.value
     environment = var.environment
     cluster_size = var.cluster_size
   })

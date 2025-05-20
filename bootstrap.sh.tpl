@@ -129,9 +129,42 @@ echo "Configuring fstab..."
 echo "$DATA_DEV /var/lib/eventstore/data ext4 defaults,nofail 0 2" >> /etc/fstab
 echo "$INDEX_DEV /var/lib/eventstore/index ext4 defaults,nofail 0 2" >> /etc/fstab
 
+# Handle SSL certificates if provided
+if [ ! -z "${cert_text}" ] && [ ! -z "${key_text}" ] && [ ! -z "${ca_text}" ]; then
+  echo "Configuring SSL certificates..."
+  
+  # Create certificate directories with proper permissions
+  mkdir -p /etc/eventstore/certs/ca
+  chmod 700 /etc/eventstore/certs
+  chmod 700 /etc/eventstore/certs/ca
+
+  # Write certificates
+  cat <<EOF > /etc/eventstore/certs/node.crt
+${cert_text}
+EOF
+
+  cat <<EOF > /etc/eventstore/certs/node.key
+${key_text}
+EOF
+
+  cat <<EOF > /etc/eventstore/certs/ca/ca.crt
+${ca_text}
+EOF
+
+  # Set proper ownership and permissions
+  chown -R eventstore:eventstore /etc/eventstore/certs
+  chmod 600 /etc/eventstore/certs/node.key
+  chmod 644 /etc/eventstore/certs/node.crt
+  chmod 644 /etc/eventstore/certs/ca/ca.crt
+
+  # Update system CA certificates
+  cp /etc/eventstore/certs/ca/ca.crt /usr/local/share/ca-certificates/eventstore_ca.crt
+  update-ca-certificates
+fi
+
 # Write config
 echo "Writing EventStoreDB configuration..."
-mkdir -p /etc/eventstore /etc/eventstore/certs
+mkdir -p /etc/eventstore
 
 # Default EventStoreDB configuration if not provided
 if [ -z "${config_text}" ]; then
@@ -143,7 +176,10 @@ EnableInternalTCP: true
 HttpPort: 2113
 ExternalTcpPort: 1113
 InternalTcpPort: 1112
-GossipPort: 2112"
+GossipPort: 2112
+CertificateFile: /etc/eventstore/certs/node.crt
+CertificatePrivateKeyFile: /etc/eventstore/certs/node.key
+TrustedRootCertificatesPath: /etc/eventstore/certs/ca"
 fi
 
 cat <<EOF > /etc/eventstore/eventstore.conf
@@ -156,19 +192,9 @@ Db: /var/lib/eventstore/data
 Index: /var/lib/eventstore/index
 EOF
 
-# Handle SSL certificates if provided
-if [ ! -z "${cert_text}" ] && [ ! -z "${key_text}" ]; then
-  echo "Configuring SSL certificates..."
-  cat <<EOF > /etc/eventstore/certs/cert.pem
-${cert_text}
-EOF
-
-  cat <<EOF > /etc/eventstore/certs/key.pem
-${key_text}
-EOF
-
-  chmod 600 /etc/eventstore/certs/key.pem
-fi
+# Set proper ownership for config
+chown eventstore:eventstore /etc/eventstore/eventstore.conf
+chmod 644 /etc/eventstore/eventstore.conf
 
 # Enable and start EventStoreDB
 echo "Enabling and starting EventStoreDB service..."
