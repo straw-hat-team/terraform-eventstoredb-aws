@@ -87,6 +87,10 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+# Get current region and account info
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
 locals {
   ami_id = var.ami_id != null ? var.ami_id : data.aws_ami.ubuntu[0].id
   az     = var.availability_zone != null ? var.availability_zone : data.aws_availability_zones.available.names[0]
@@ -222,7 +226,7 @@ resource "aws_iam_policy" "eventstore_policy" {
       {
         Action = ["ssm:GetParameter"],
         Effect = "Allow",
-        Resource = "arn:aws:ssm:*:*:parameter/eventstore/*"
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/eventstore/*"
       },
       {
         Action = ["cloudwatch:PutMetricData"],
@@ -370,6 +374,7 @@ resource "aws_backup_plan" "eventstore_plan" {
     schedule          = "cron(0 5 * * ? *)"
     lifecycle {
       delete_after = 30
+      cold_storage_after = 7
     }
   }
 }
@@ -570,7 +575,11 @@ resource "aws_cloudwatch_metric_alarm" "cpu_usage" {
 }
 
 output "cluster_node_ips" {
-  value = [for i in aws_instance.eventstore : i.private_ip]
+  value = aws_autoscaling_group.eventstore.instances[*].private_ip
+}
+
+output "node_dns_names" {
+  value = aws_autoscaling_group.eventstore.instances[*].private_dns
 }
 
 output "gossip_seeds" {

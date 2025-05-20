@@ -108,6 +108,22 @@ chmod 600 /etc/eventstore/certs/key.pem
 
 # Enable and start EventStoreDB
 echo "Enabling and starting EventStoreDB service..."
+
+# Create systemd override directory
+mkdir -p /etc/systemd/system/eventstore.service.d
+
+# Write systemd override configuration
+cat <<EOF > /etc/systemd/system/eventstore.service.d/override.conf
+[Service]
+Restart=always
+RestartSec=5
+LimitNOFILE=100000
+EOF
+
+# Reload systemd to pick up changes
+systemctl daemon-reload
+
+# Enable and start EventStoreDB
 systemctl enable eventstore
 systemctl start eventstore
 
