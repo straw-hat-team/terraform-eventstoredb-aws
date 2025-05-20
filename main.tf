@@ -5,8 +5,10 @@ provider "aws" {
 variable "network_type" {
   description = "Specify if the instance should be public or private"
   type        = string
-  default     = "private" # or "public"
+  default     = "private"
 }
+
+variable "key_pair_name" {}
 
 resource "aws_vpc" "eventstore_vpc" {
   cidr_block = "172.28.0.0/16"
@@ -16,9 +18,9 @@ resource "aws_vpc" "eventstore_vpc" {
 }
 
 resource "aws_subnet" "eventstore_subnet" {
-  vpc_id            = aws_vpc.eventstore_vpc.id
-  cidr_block        = "172.28.1.0/24"
-  availability_zone = "us-east-1a"
+  vpc_id                  = aws_vpc.eventstore_vpc.id
+  cidr_block              = "172.28.1.0/24"
+  availability_zone       = "us-east-1a"
   map_public_ip_on_launch = var.network_type == "public"
 
   tags = {
@@ -82,37 +84,39 @@ resource "aws_security_group" "eventstore_sg" {
   }
 }
 
+resource "aws_ebs_volume" "data_volume" {
+  availability_zone = "us-east-1a"
+  size              = 200
+  type              = "gp3"
+  iops              = 3000
+  throughput        = 125
+  tags = {
+    Name = "eventstore-data"
+  }
+}
+
+resource "aws_ebs_volume" "index_volume" {
+  availability_zone = "us-east-1a"
+  size              = 100
+  type              = "gp3"
+  iops              = 3000
+  throughput        = 125
+  tags = {
+    Name = "eventstore-index"
+  }
+}
+
 resource "aws_instance" "eventstore" {
-  ami                    = "ami-xxxxxxxxxxxxxxxxx" # Ubuntu 22.04 AMI
-  instance_type          = "m6i.large"
-  subnet_id              = aws_subnet.eventstore_subnet.id
+  ami                         = "ami-xxxxxxxxxxxxxxxxx" # Ubuntu 22.04 AMI
+  instance_type               = "m6i.large"
+  subnet_id                   = aws_subnet.eventstore_subnet.id
   associate_public_ip_address = var.network_type == "public"
-  key_name               = var.key_pair_name
-  vpc_security_group_ids = [aws_security_group.eventstore_sg.id]
+  key_name                    = var.key_pair_name
+  vpc_security_group_ids      = [aws_security_group.eventstore_sg.id]
 
   root_block_device {
     volume_size = 20
     volume_type = "gp3"
-  }
-
-  # Attach Data Volume
-  ebs_block_device {
-    device_name           = "/dev/xvdf"
-    volume_size           = 200
-    volume_type           = "gp3"
-    iops                  = 3000
-    throughput            = 125
-    delete_on_termination = false
-  }
-
-  # Attach Index Volume
-  ebs_block_device {
-    device_name           = "/dev/xvdg"
-    volume_size           = 100
-    volume_type           = "gp3"
-    iops                  = 3000
-    throughput            = 125
-    delete_on_termination = false
   }
 
   tags = {
@@ -145,4 +149,14 @@ resource "aws_instance" "eventstore" {
               EOF
 }
 
-variable "key_pair_name" {}
+resource "aws_volume_attachment" "data_attach" {
+  device_name = "/dev/sdf"
+  volume_id   = aws_ebs_volume.data_volume.id
+  instance_id = aws_instance.eventstore.id
+}
+
+resource "aws_volume_attachment" "index_attach" {
+  device_name = "/dev/sdg"
+  volume_id   = aws_ebs_volume.index_volume.id
+  instance_id = aws_instance.eventstore.id
+}
