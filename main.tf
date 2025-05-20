@@ -126,6 +126,10 @@ resource "aws_instance" "eventstore" {
   user_data = <<-EOF
               #!/bin/bash
               set -e
+              # Set EventStoreDB environment variables
+              echo "EVENTSTORE_DB=/var/lib/eventstore/data" >> /etc/environment
+              echo "EVENTSTORE_INDEX=/var/lib/eventstore/index" >> /etc/environment
+
               # Format and mount data volume
               mkfs.ext4 /dev/xvdf
               mkdir -p /var/lib/eventstore/data
