@@ -65,6 +65,12 @@ variable "alarm_email" {
   default     = null
 }
 
+variable "slack_webhook_url" {
+  description = "Slack webhook URL for notifications (optional)"
+  type        = string
+  default     = null
+}
+
 # Get available AZs
 data "aws_availability_zones" "available" {
   state = "available"
@@ -688,4 +694,109 @@ output "gossip_seeds" {
 
 output "backup_vault_name" {
   value = aws_backup_vault.eventstore_backup.name
+}
+
+# Slack integration
+resource "aws_sns_topic" "slack_notifications" {
+  count = var.slack_webhook_url != null ? 1 : 0
+  name  = "eventstore-slack-notifications"
+}
+
+resource "aws_sns_topic_policy" "slack_notifications" {
+  count  = var.slack_webhook_url != null ? 1 : 0
+  arn    = aws_sns_topic.slack_notifications[0].arn
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudwatch.amazonaws.com"
+        }
+        Action   = "SNS:Publish"
+        Resource = aws_sns_topic.slack_notifications[0].arn
+      }
+    ]
+  })
+}
+
+resource "aws_sns_topic_subscription" "slack_notifications" {
+  count     = var.slack_webhook_url != null ? 1 : 0
+  topic_arn = aws_sns_topic.slack_notifications[0].arn
+  protocol  = "https"
+  endpoint  = var.slack_webhook_url
+}
+
+# Enhanced monitoring alarms
+resource "aws_cloudwatch_metric_alarm" "core_load" {
+  for_each            = { for idx, instance in aws_instance.eventstore : idx => instance }
+  alarm_name          = "eventstore-${each.key}-core-load"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period             = "300"
+  statistic          = "Average"
+  threshold          = "80"
+  alarm_description  = "This metric monitors EC2 CPU utilization"
+  alarm_actions      = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+  ok_actions         = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+  dimensions = {
+    InstanceId = each.value.id
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "cluster_consensus" {
+  for_each            = { for idx, instance in aws_instance.eventstore : idx => instance }
+  alarm_name          = "eventstore-${each.key}-cluster-consensus"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = "1"
+  metric_name         = "StatusCheckFailed"
+  namespace           = "AWS/EC2"
+  period             = "60"
+  statistic          = "Maximum"
+  threshold          = "1"
+  alarm_description  = "This metric monitors cluster consensus status"
+  alarm_actions      = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+  ok_actions         = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+  dimensions = {
+    InstanceId = each.value.id
+  }
+}
+
+# Enhanced disk usage monitoring
+resource "aws_cloudwatch_metric_alarm" "disk_usage_warning" {
+  for_each            = { for idx, instance in aws_instance.eventstore : idx => instance }
+  alarm_name          = "eventstore-${each.key}-disk-usage-warning"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "disk_used_percent"
+  namespace           = "System/Linux"
+  period             = "300"
+  statistic          = "Average"
+  threshold          = "70"
+  alarm_description  = "This metric monitors disk usage (warning threshold)"
+  alarm_actions      = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+  ok_actions         = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+  dimensions = {
+    InstanceId = each.value.id
+  }
 }
