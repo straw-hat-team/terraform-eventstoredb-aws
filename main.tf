@@ -17,6 +17,66 @@ variable "network_type" {
 
 variable "key_pair_name" {}
 
+variable "cluster_size" {
+  description = "Number of nodes in the EventStoreDB cluster (must be odd)"
+  type        = number
+  default     = 3
+}
+
+variable "gossip_mode" {
+  description = "Choose 'ip' or 'dns' for gossip seed discovery"
+  type        = string
+  default     = "ip"
+}
+
+# Fetch EventStoreDB config and certs from SSM
+
+data "aws_ssm_parameter" "eventstore_conf" {
+  name            = "/eventstore/config"
+  with_decryption = true
+}
+
+data "aws_ssm_parameter" "cert_pem" {
+  name            = "/eventstore/cert.pem"
+  with_decryption = true
+}
+
+data "aws_ssm_parameter" "key_pem" {
+  name            = "/eventstore/key.pem"
+  with_decryption = true
+}
+
+# VPC & Networking
+
+resource "aws_internet_gateway" "eventstore_igw" {
+  count  = var.network_type == "public" ? 1 : 0
+  vpc_id = aws_vpc.eventstore_vpc.id
+
+  tags = {
+    Name = "eventstore-igw"
+  }
+}
+
+resource "aws_route_table" "eventstore_rt" {
+  count  = var.network_type == "public" ? 1 : 0
+  vpc_id = aws_vpc.eventstore_vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.eventstore_igw[0].id
+  }
+
+  tags = {
+    Name = "eventstore-rt"
+  }
+}
+
+resource "aws_route_table_association" "eventstore_rta" {
+  count          = var.network_type == "public" ? 1 : 0
+  subnet_id      = aws_subnet.eventstore_subnet.id
+  route_table_id = aws_route_table.eventstore_rt[0].id
+}
+
 resource "aws_vpc" "eventstore_vpc" {
   cidr_block = "172.28.0.0/16"
   tags = {
@@ -29,40 +89,10 @@ resource "aws_subnet" "eventstore_subnet" {
   cidr_block              = "172.28.1.0/24"
   availability_zone       = "us-east-1a"
   map_public_ip_on_launch = var.network_type == "public"
-
-  tags = {
-    Name = "eventstore-subnet"
-  }
-}
-
-resource "aws_internet_gateway" "igw" {
-  count  = var.network_type == "public" ? 1 : 0
-  vpc_id = aws_vpc.eventstore_vpc.id
-}
-
-resource "aws_route_table" "public_rt" {
-  count  = var.network_type == "public" ? 1 : 0
-  vpc_id = aws_vpc.eventstore_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw[0].id
-  }
-
-  tags = {
-    Name = "public-route-table"
-  }
-}
-
-resource "aws_route_table_association" "public_rta" {
-  count          = var.network_type == "public" ? 1 : 0
-  subnet_id      = aws_subnet.eventstore_subnet.id
-  route_table_id = aws_route_table.public_rt[0].id
 }
 
 resource "aws_security_group" "eventstore_sg" {
   name        = "eventstore-sg"
-  description = "Allow EventStoreDB traffic"
   vpc_id      = aws_vpc.eventstore_vpc.id
 
   ingress {
@@ -85,41 +115,82 @@ resource "aws_security_group" "eventstore_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  tags = {
-    Name = "eventstore-sg"
-  }
 }
 
-resource "aws_ebs_volume" "data_volume" {
-  availability_zone = "us-east-1a"
-  size              = 200
-  type              = "gp3"
-  iops              = 3000
-  throughput        = 125
-  tags = {
-    Name = "eventstore-data"
-  }
+# IAM
+
+resource "aws_iam_role" "eventstore_role" {
+  name = "eventstore-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      },
+      Action = "sts:AssumeRole"
+    }]
+  })
 }
 
-resource "aws_ebs_volume" "index_volume" {
-  availability_zone = "us-east-1a"
-  size              = 100
-  type              = "gp3"
-  iops              = 3000
-  throughput        = 125
-  tags = {
-    Name = "eventstore-index"
-  }
+resource "aws_iam_policy" "eventstore_policy" {
+  name = "eventstore-policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Action = ["ssm:GetParameter"],
+        Effect = "Allow",
+        Resource = "arn:aws:ssm:*:*:parameter/eventstore/*"
+      },
+      {
+        Action = ["cloudwatch:PutMetricData"],
+        Effect = "Allow",
+        Resource = "*"
+      },
+      {
+        Action = ["backup:StartBackupJob", "backup:ListBackupJobs"],
+        Effect = "Allow",
+        Resource = "*"
+      }
+    ]
+  })
 }
+
+resource "aws_iam_role_policy_attachment" "eventstore_attach" {
+  role       = aws_iam_role.eventstore_role.name
+  policy_arn = aws_iam_policy.eventstore_policy.arn
+}
+
+resource "aws_iam_instance_profile" "eventstore_profile" {
+  name = "eventstore-profile"
+  role = aws_iam_role.eventstore_role.name
+}
+
+# Local Gossip Seed IPs or DNS
+
+locals {
+  gossip_seeds = var.gossip_mode == "dns" ? [
+    for i in range(var.cluster_size) : "esdb-${i + 1}.internal"
+  ] : [
+    for i in aws_instance.eventstore : i.private_ip
+  ]
+}
+
+# Instance + Volumes
 
 resource "aws_instance" "eventstore" {
-  ami                         = "ami-xxxxxxxxxxxxxxxxx" # Ubuntu 22.04 AMI
+  count = var.cluster_size
+
+  ami                         = "ami-xxxxxxxxxxxxxxxxx"
   instance_type               = "m6i.large"
   subnet_id                   = aws_subnet.eventstore_subnet.id
   associate_public_ip_address = var.network_type == "public"
   key_name                    = var.key_pair_name
   vpc_security_group_ids      = [aws_security_group.eventstore_sg.id]
+  iam_instance_profile        = aws_iam_instance_profile.eventstore_profile.name
 
   root_block_device {
     volume_size = 20
@@ -127,47 +198,100 @@ resource "aws_instance" "eventstore" {
   }
 
   tags = {
-    Name = "eventstore-node"
+    Name        = "eventstore-node-${count.index + 1}"
+    Cluster     = "eventstore"
+    Role        = "eventstoredb"
+    Environment = "dev"
   }
 
-  user_data = <<-EOF
-              #!/bin/bash
-              set -e
-              # Set EventStoreDB environment variables
-              echo "EVENTSTORE_DB=/var/lib/eventstore/data" >> /etc/environment
-              echo "EVENTSTORE_INDEX=/var/lib/eventstore/index" >> /etc/environment
+  user_data = templatefile("${path.module}/bootstrap.sh.tpl", {
+    node_ip     = var.gossip_mode == "dns" ? "esdb-${count.index + 1}.internal" : aws_instance.eventstore[count.index].private_ip
+    peer_ips    = join(",", local.gossip_seeds)
+    node_name   = "esdb-${count.index + 1}"
+    config_text = data.aws_ssm_parameter.eventstore_conf.value
+    cert_text   = data.aws_ssm_parameter.cert_pem.value
+    key_text    = data.aws_ssm_parameter.key_pem.value
+  })
+}
 
-              # Format and mount data volume
-              mkfs.ext4 /dev/xvdf
-              mkdir -p /var/lib/eventstore/data
-              mount /dev/xvdf /var/lib/eventstore/data
+resource "aws_ebs_volume" "data_volume" {
+  count             = var.cluster_size
+  availability_zone = "us-east-1a"
+  size              = 200
+  type              = "gp3"
+  iops              = 3000
+  throughput        = 125
+  tags = {
+    Name = "eventstore-data-${count.index + 1}"
+  }
+}
 
-              # Format and mount index volume
-              mkfs.ext4 /dev/xvdg
-              mkdir -p /var/lib/eventstore/index
-              mount /dev/xvdg /var/lib/eventstore/index
-
-              echo "/dev/xvdf /var/lib/eventstore/data ext4 defaults,nofail 0 2" >> /etc/fstab
-              echo "/dev/xvdg /var/lib/eventstore/index ext4 defaults,nofail 0 2" >> /etc/fstab
-
-              # Pull config and certs from S3 (or another source)
-              aws s3 cp s3://my-eventstore-config/eventstore.conf /etc/eventstore/eventstore.conf
-              aws s3 cp s3://my-eventstore-certs/ /etc/eventstore/certs/ --recursive
-
-              # Start eventstoredb
-              systemctl enable eventstore
-              systemctl start eventstore
-              EOF
+resource "aws_ebs_volume" "index_volume" {
+  count             = var.cluster_size
+  availability_zone = "us-east-1a"
+  size              = 100
+  type              = "gp3"
+  iops              = 3000
+  throughput        = 125
+  tags = {
+    Name = "eventstore-index-${count.index + 1}"
+  }
 }
 
 resource "aws_volume_attachment" "data_attach" {
+  count       = var.cluster_size
   device_name = "/dev/sdf"
-  volume_id   = aws_ebs_volume.data_volume.id
-  instance_id = aws_instance.eventstore.id
+  volume_id   = aws_ebs_volume.data_volume[count.index].id
+  instance_id = aws_instance.eventstore[count.index].id
 }
 
 resource "aws_volume_attachment" "index_attach" {
+  count       = var.cluster_size
   device_name = "/dev/sdg"
-  volume_id   = aws_ebs_volume.index_volume.id
-  instance_id = aws_instance.eventstore.id
+  volume_id   = aws_ebs_volume.index_volume[count.index].id
+  instance_id = aws_instance.eventstore[count.index].id
+}
+
+# Backup Vault
+
+resource "aws_backup_vault" "eventstore_backup" {
+  name = "eventstore-backup-vault"
+}
+
+resource "aws_backup_plan" "eventstore_plan" {
+  name = "eventstore-backup-plan"
+
+  rule {
+    rule_name         = "daily-snapshots"
+    target_vault_name = aws_backup_vault.eventstore_backup.name
+    schedule          = "cron(0 5 * * ? *)"
+    lifecycle {
+      delete_after = 30
+    }
+  }
+}
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_backup_selection" "eventstore_selection" {
+  name         = "eventstore-volumes"
+  iam_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/service-role/AWSBackupDefaultServiceRole"
+  plan_id      = aws_backup_plan.eventstore_plan.id
+
+  resources = concat(
+    [for v in aws_ebs_volume.data_volume : v.arn],
+    [for v in aws_ebs_volume.index_volume : v.arn]
+  )
+}
+
+output "cluster_node_ips" {
+  value = [for i in aws_instance.eventstore : i.private_ip]
+}
+
+output "gossip_seeds" {
+  value = local.gossip_seeds
+}
+
+output "backup_vault_name" {
+  value = aws_backup_vault.eventstore_backup.name
 }
