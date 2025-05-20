@@ -242,6 +242,17 @@ resource "aws_iam_policy" "eventstore_policy" {
         Action = ["backup:StartBackupJob", "backup:ListBackupJobs"],
         Effect = "Allow",
         Resource = "*"
+      },
+      {
+        Action = [
+          "ssm:CreateAssociation",
+          "ssm:UpdateAssociation",
+          "ssm:DeleteAssociation",
+          "ssm:GetAssociation",
+          "ssm:ListAssociations"
+        ],
+        Effect = "Allow",
+        Resource = "*"
       }
     ]
   })
@@ -436,6 +447,13 @@ resource "aws_sns_topic_subscription" "eventstore_alarms" {
   endpoint  = var.alarm_email
 }
 
+# CloudWatch Logs Group
+resource "aws_cloudwatch_log_group" "user_data_log_group" {
+  name              = "/eventstore/${var.environment}/user-data"
+  retention_in_days = 30
+  tags              = local.common_tags
+}
+
 # CloudWatch Alarms
 locals {
   alarm_thresholds = {
@@ -582,6 +600,63 @@ resource "aws_cloudwatch_metric_alarm" "cpu_usage" {
     InstanceId = aws_instance.eventstore[count.index].id
     Cluster    = "eventstore"
     Role       = "eventstoredb"
+  }
+
+  tags = local.common_tags
+}
+
+# SSM Document for Drift Detection and Restart
+resource "aws_ssm_document" "eventstore_drift_detection" {
+  name            = "EventStoreDB-DriftDetection"
+  document_type   = "Command"
+  document_format = "YAML"
+  content         = <<DOC
+schemaVersion: '2.2'
+description: 'Detect and fix EventStoreDB configuration drift'
+mainSteps:
+  - action: aws:runShellScript
+    name: checkEventStoreStatus
+    inputs:
+      runCommand:
+        - systemctl is-active eventstore
+    nextStep: evaluateStatus
+  - action: aws:runShellScript
+    name: evaluateStatus
+    inputs:
+      runCommand:
+        - |
+          if [ "$(systemctl is-active eventstore)" != "active" ]; then
+            echo "EventStoreDB service is not active. Attempting to restart..."
+            systemctl restart eventstore
+            sleep 10
+            if [ "$(systemctl is-active eventstore)" != "active" ]; then
+              echo "Failed to restart EventStoreDB service"
+              exit 1
+            fi
+          else
+            echo "EventStoreDB service is running normally"
+          fi
+DOC
+  tags = local.common_tags
+}
+
+# SSM Association for Drift Detection
+resource "aws_ssm_association" "eventstore_drift_detection" {
+  name = aws_ssm_document.eventstore_drift_detection.name
+
+  targets {
+    key    = "tag:Role"
+    values = ["eventstoredb"]
+  }
+
+  schedule_expression = "rate(1 hour)"
+  apply_only_at_cron_interval = true
+
+  parameters = {
+    "commands" = jsonencode([
+      "systemctl is-active eventstore",
+      "if [ $? -ne 0 ]; then systemctl restart eventstore; fi"
+    ])
   }
 
   tags = local.common_tags
