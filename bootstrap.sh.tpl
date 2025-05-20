@@ -48,15 +48,22 @@ cat <<EOC > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
     },
     "metrics_collected": {
       "disk": {
-        "measurement": ["used_percent"],
-        "resources": ["/"]
+        "measurement": ["used_percent", "used", "free", "total", "inodes_free", "inodes_total"],
+        "resources": ["/", "/var/lib/eventstore/data", "/var/lib/eventstore/index"]
       },
       "mem": {
-        "measurement": ["mem_used_percent"]
+        "measurement": ["mem_used_percent", "mem_used", "mem_total", "mem_free", "mem_available"]
       },
       "cpu": {
-        "measurement": ["cpu_usage_idle", "cpu_usage_user", "cpu_usage_system"],
+        "measurement": ["cpu_usage_idle", "cpu_usage_user", "cpu_usage_system", "cpu_usage_iowait", "cpu_usage_steal", "cpu_usage_softirq"],
         "totalcpu": true
+      },
+      "net": {
+        "measurement": ["net_bytes_recv", "net_bytes_sent", "net_packets_recv", "net_packets_sent", "net_err_in", "net_err_out", "net_drop_in", "net_drop_out"],
+        "resources": ["eth0"]
+      },
+      "swap": {
+        "measurement": ["swap_used_percent", "swap_used", "swap_free"]
       }
     }
   },
@@ -67,6 +74,18 @@ cat <<EOC > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
           {
             "file_path": "/var/log/user-data.log",
             "log_group_name": "/eventstore/${environment}/user-data",
+            "log_stream_name": "{instance_id}",
+            "timezone": "UTC"
+          },
+          {
+            "file_path": "/var/log/eventstore/*.log",
+            "log_group_name": "/eventstore/${environment}/eventstore",
+            "log_stream_name": "{instance_id}",
+            "timezone": "UTC"
+          },
+          {
+            "file_path": "/var/log/syslog",
+            "log_group_name": "/eventstore/${environment}/syslog",
             "log_stream_name": "{instance_id}",
             "timezone": "UTC"
           }
@@ -235,5 +254,92 @@ if [ $attempt -gt $max_attempts ]; then
   echo "Error: EventStoreDB failed to become healthy after $max_attempts attempts"
   exit 1
 fi
+
+# Create certificate expiration check script
+cat <<'EOF' > /usr/local/bin/check-cert-expiration.sh
+#!/bin/bash
+
+CERT_FILE="/etc/eventstore/certs/node.crt"
+if [ ! -f "$CERT_FILE" ]; then
+    echo "Certificate file not found: $CERT_FILE"
+    exit 1
+fi
+
+# Get certificate expiration date
+EXPIRY_DATE=$(openssl x509 -enddate -noout -in "$CERT_FILE" | cut -d= -f2)
+EXPIRY_EPOCH=$(date -d "$EXPIRY_DATE" +%s)
+CURRENT_EPOCH=$(date +%s)
+DAYS_LEFT=$(( ($EXPIRY_EPOCH - $CURRENT_EPOCH) / 86400 ))
+
+# Send metric to CloudWatch
+aws cloudwatch put-metric-data \
+    --namespace EventStoreDB \
+    --metric-name CertificateExpirationDays \
+    --value $DAYS_LEFT \
+    --unit Count \
+    --dimensions InstanceId=$(curl -s http://169.254.169.254/latest/meta-data/instance-id),Cluster=eventstore,Role=eventstoredb
+EOF
+
+chmod +x /usr/local/bin/check-cert-expiration.sh
+
+# Add certificate check to crontab
+(crontab -l 2>/dev/null; echo "0 0 * * * /usr/local/bin/check-cert-expiration.sh") | crontab -
+
+# Create EventStoreDB metrics collection script
+cat <<'EOF' > /usr/local/bin/collect-eventstore-metrics.sh
+#!/bin/bash
+
+# Function to get EventStoreDB metrics
+get_eventstore_metrics() {
+    local metrics=$(curl -s http://localhost:2113/stats)
+    
+    # Extract metrics
+    local write_events=$(echo "$metrics" | jq -r '.proc.writeEventsPerSecond')
+    local read_events=$(echo "$metrics" | jq -r '.proc.readEventsPerSecond')
+    local queue_length=$(echo "$metrics" | jq -r '.proc.queueLength')
+    local projection_time=$(echo "$metrics" | jq -r '.proc.projectionProcessingTime')
+    
+    # Send metrics to CloudWatch
+    aws cloudwatch put-metric-data \
+        --namespace EventStoreDB \
+        --metric-name WriteEventsPerSecond \
+        --value $write_events \
+        --unit Count \
+        --dimensions InstanceId=$(curl -s http://169.254.169.254/latest/meta-data/instance-id),Cluster=eventstore,Role=eventstoredb
+    
+    aws cloudwatch put-metric-data \
+        --namespace EventStoreDB \
+        --metric-name ReadEventsPerSecond \
+        --value $read_events \
+        --unit Count \
+        --dimensions InstanceId=$(curl -s http://169.254.169.254/latest/meta-data/instance-id),Cluster=eventstore,Role=eventstoredb
+    
+    aws cloudwatch put-metric-data \
+        --namespace EventStoreDB \
+        --metric-name QueueLength \
+        --value $queue_length \
+        --unit Count \
+        --dimensions InstanceId=$(curl -s http://169.254.169.254/latest/meta-data/instance-id),Cluster=eventstore,Role=eventstoredb
+    
+    aws cloudwatch put-metric-data \
+        --namespace EventStoreDB \
+        --metric-name ProjectionProcessingTime \
+        --value $projection_time \
+        --unit Milliseconds \
+        --dimensions InstanceId=$(curl -s http://169.254.169.254/latest/meta-data/instance-id),Cluster=eventstore,Role=eventstoredb
+}
+
+# Run metrics collection
+get_eventstore_metrics
+EOF
+
+chmod +x /usr/local/bin/collect-eventstore-metrics.sh
+
+# Add EventStoreDB metrics collection to crontab
+(crontab -l 2>/dev/null; echo "*/5 * * * * /usr/local/bin/collect-eventstore-metrics.sh") | crontab -
+
+# Install required packages
+apt-get update -y
+apt-get install -y jq
 
 echo "Bootstrap script completed successfully"

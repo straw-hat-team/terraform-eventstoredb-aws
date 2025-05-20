@@ -785,3 +785,145 @@ resource "aws_cloudwatch_metric_alarm" "disk_usage_warning" {
     InstanceId = each.value.id
   }
 }
+
+# Certificate Expiration Monitoring
+resource "aws_cloudwatch_metric_alarm" "cert_expiration" {
+  count               = var.cluster_size
+  alarm_name          = "eventstore-cert-expiration-${count.index + 1}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "CertificateExpirationDays"
+  namespace           = "EventStoreDB"
+  period             = 86400  # Check daily
+  statistic          = "Minimum"
+  threshold          = 30     # Alert 30 days before expiration
+  alarm_description  = "SSL certificate is expiring soon"
+  alarm_actions      = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+  ok_actions         = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+
+  dimensions = {
+    InstanceId = aws_instance.eventstore[count.index].id
+    Cluster    = "eventstore"
+    Role       = "eventstoredb"
+  }
+
+  tags = local.common_tags
+}
+
+# Enhanced EventStoreDB Metrics Monitoring
+resource "aws_cloudwatch_metric_alarm" "eventstore_metrics" {
+  for_each = {
+    "WriteEventsPerSecond" = {
+      metric_name = "WriteEventsPerSecond"
+      threshold   = 1000
+      operator    = "GreaterThanThreshold"
+      period      = 300
+    }
+    "ReadEventsPerSecond" = {
+      metric_name = "ReadEventsPerSecond"
+      threshold   = 2000
+      operator    = "GreaterThanThreshold"
+      period      = 300
+    }
+    "QueueLength" = {
+      metric_name = "QueueLength"
+      threshold   = 1000
+      operator    = "GreaterThanThreshold"
+      period      = 300
+    }
+    "ProjectionProcessingTime" = {
+      metric_name = "ProjectionProcessingTime"
+      threshold   = 5000
+      operator    = "GreaterThanThreshold"
+      period      = 300
+    }
+  }
+
+  for_each            = { for idx, instance in aws_instance.eventstore : idx => instance }
+  alarm_name          = "eventstore-${each.key}-${each.value.metric_name}"
+  comparison_operator = each.value.operator
+  evaluation_periods  = 2
+  metric_name         = each.value.metric_name
+  namespace           = "EventStoreDB"
+  period             = each.value.period
+  statistic          = "Average"
+  threshold          = each.value.threshold
+  alarm_description  = "EventStoreDB ${each.value.metric_name} is above threshold"
+  alarm_actions      = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+  ok_actions         = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+
+  dimensions = {
+    InstanceId = each.value.id
+    Cluster    = "eventstore"
+    Role       = "eventstoredb"
+  }
+
+  tags = local.common_tags
+}
+
+# Enhanced System Metrics Monitoring
+resource "aws_cloudwatch_metric_alarm" "system_metrics" {
+  for_each = {
+    "NetworkIn" = {
+      metric_name = "NetworkIn"
+      threshold   = 1000000  # 1 MB/s
+      operator    = "GreaterThanThreshold"
+      period      = 300
+    }
+    "NetworkOut" = {
+      metric_name = "NetworkOut"
+      threshold   = 1000000  # 1 MB/s
+      operator    = "GreaterThanThreshold"
+      period      = 300
+    }
+    "DiskReadOps" = {
+      metric_name = "DiskReadOps"
+      threshold   = 1000
+      operator    = "GreaterThanThreshold"
+      period      = 300
+    }
+    "DiskWriteOps" = {
+      metric_name = "DiskWriteOps"
+      threshold   = 1000
+      operator    = "GreaterThanThreshold"
+      period      = 300
+    }
+  }
+
+  for_each            = { for idx, instance in aws_instance.eventstore : idx => instance }
+  alarm_name          = "eventstore-${each.key}-${each.value.metric_name}"
+  comparison_operator = each.value.operator
+  evaluation_periods  = 2
+  metric_name         = each.value.metric_name
+  namespace           = "AWS/EC2"
+  period             = each.value.period
+  statistic          = "Average"
+  threshold          = each.value.threshold
+  alarm_description  = "System ${each.value.metric_name} is above threshold"
+  alarm_actions      = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+  ok_actions         = concat(
+    [aws_sns_topic.eventstore_alarms.arn],
+    var.slack_webhook_url != null ? [aws_sns_topic.slack_notifications[0].arn] : []
+  )
+
+  dimensions = {
+    InstanceId = each.value.id
+  }
+
+  tags = local.common_tags
+}
