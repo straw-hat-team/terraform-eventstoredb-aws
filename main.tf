@@ -229,7 +229,7 @@ resource "aws_iam_policy" "eventstore_policy" {
     Version = "2012-10-17",
     Statement = [
       {
-        Action = ["ssm:GetParameter"],
+        Action = ["ssm:GetParameter", "ssm:GetParameters"],
         Effect = "Allow",
         Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/eventstore/*"
       },
@@ -388,6 +388,7 @@ resource "aws_backup_plan" "eventstore_plan" {
       delete_after = 30
       cold_storage_after = 7
     }
+    tags = local.common_tags
   }
 }
 

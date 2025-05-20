@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Check if already bootstrapped
+if [ -f /etc/eventstore/bootstrapped ]; then
+  echo "Already bootstrapped. Exiting."
+  exit 0
+fi
+touch /etc/eventstore/bootstrapped
+
 # Redirect all output to both console and log file
 exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
@@ -34,6 +41,20 @@ cat <<EOC > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
       "cpu": {
         "measurement": ["cpu_usage_idle", "cpu_usage_user", "cpu_usage_system"],
         "totalcpu": true
+      }
+    }
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/user-data.log",
+            "log_group_name": "/eventstore/${environment}/user-data",
+            "log_stream_name": "{instance_id}",
+            "timezone": "UTC"
+          }
+        ]
       }
     }
   }
@@ -136,5 +157,24 @@ systemctl daemon-reload
 # Enable and start EventStoreDB
 systemctl enable eventstore
 systemctl start eventstore
+
+# Wait for EventStoreDB to be healthy
+echo "Waiting for EventStoreDB to be healthy..."
+max_attempts=30
+attempt=1
+while [ $attempt -le $max_attempts ]; do
+  if curl --fail --max-time 2 http://localhost:2113/gossip > /dev/null 2>&1; then
+    echo "EventStoreDB is healthy!"
+    break
+  fi
+  echo "Attempt $attempt/$max_attempts: EventStoreDB not ready yet..."
+  sleep 5
+  attempt=$((attempt + 1))
+done
+
+if [ $attempt -gt $max_attempts ]; then
+  echo "Error: EventStoreDB failed to become healthy after $max_attempts attempts"
+  exit 1
+fi
 
 echo "Bootstrap script completed successfully"
