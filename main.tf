@@ -59,6 +59,12 @@ variable "owner" {
   default     = null
 }
 
+variable "alarm_email" {
+  description = "Email address for CloudWatch alarm notifications"
+  type        = string
+  default     = null
+}
+
 # Get available AZs
 data "aws_availability_zones" "available" {
   state = "available"
@@ -377,6 +383,188 @@ resource "aws_backup_selection" "eventstore_selection" {
     [for v in aws_ebs_volume.data_volume : v.arn],
     [for v in aws_ebs_volume.index_volume : v.arn]
   )
+
+  tags = local.common_tags
+}
+
+# SNS Topic for alarms
+resource "aws_sns_topic" "eventstore_alarms" {
+  name = "eventstore-alarms"
+  tags = local.common_tags
+}
+
+resource "aws_sns_topic_policy" "eventstore_alarms" {
+  arn = aws_sns_topic.eventstore_alarms.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudwatch.amazonaws.com"
+        }
+        Action   = "SNS:Publish"
+        Resource = aws_sns_topic.eventstore_alarms.arn
+      }
+    ]
+  })
+}
+
+resource "aws_sns_topic_subscription" "eventstore_alarms" {
+  count     = var.alarm_email != null ? 1 : 0
+  topic_arn = aws_sns_topic.eventstore_alarms.arn
+  protocol  = "email"
+  endpoint  = var.alarm_email
+}
+
+# CloudWatch Alarms
+locals {
+  alarm_thresholds = {
+    disk_usage_warning  = 80
+    disk_usage_critical = 90
+    memory_usage       = 85
+    cpu_usage         = 80
+  }
+}
+
+# EC2 Status Check Alarms
+resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
+  count               = var.cluster_size
+  alarm_name          = "eventstore-ec2-status-${count.index + 1}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "StatusCheckFailed"
+  namespace           = "AWS/EC2"
+  period             = 60
+  statistic          = "Maximum"
+  threshold          = 0
+  alarm_description  = "EC2 instance status check failed"
+  alarm_actions      = [aws_sns_topic.eventstore_alarms.arn]
+  ok_actions         = [aws_sns_topic.eventstore_alarms.arn]
+
+  dimensions = {
+    InstanceId = aws_instance.eventstore[count.index].id
+  }
+
+  tags = local.common_tags
+}
+
+# EBS Volume Status Alarms
+resource "aws_cloudwatch_metric_alarm" "ebs_status" {
+  count               = var.cluster_size * 2 # For both data and index volumes
+  alarm_name          = "eventstore-ebs-status-${count.index + 1}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "VolumeStatusCheckFailed"
+  namespace           = "AWS/EBS"
+  period             = 60
+  statistic          = "Maximum"
+  threshold          = 0
+  alarm_description  = "EBS volume status check failed"
+  alarm_actions      = [aws_sns_topic.eventstore_alarms.arn]
+  ok_actions         = [aws_sns_topic.eventstore_alarms.arn]
+
+  dimensions = {
+    VolumeId = count.index < var.cluster_size ? 
+      aws_ebs_volume.data_volume[count.index].id : 
+      aws_ebs_volume.index_volume[count.index - var.cluster_size].id
+  }
+
+  tags = local.common_tags
+}
+
+# Disk Usage Alarms
+resource "aws_cloudwatch_metric_alarm" "disk_usage_warning" {
+  count               = var.cluster_size
+  alarm_name          = "eventstore-disk-usage-warning-${count.index + 1}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "disk_used_percent"
+  namespace           = "EventStoreDB"
+  period             = 300
+  statistic          = "Average"
+  threshold          = local.alarm_thresholds.disk_usage_warning
+  alarm_description  = "Disk usage is above warning threshold"
+  alarm_actions      = [aws_sns_topic.eventstore_alarms.arn]
+  ok_actions         = [aws_sns_topic.eventstore_alarms.arn]
+
+  dimensions = {
+    InstanceId = aws_instance.eventstore[count.index].id
+    Cluster    = "eventstore"
+    Role       = "eventstoredb"
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "disk_usage_critical" {
+  count               = var.cluster_size
+  alarm_name          = "eventstore-disk-usage-critical-${count.index + 1}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "disk_used_percent"
+  namespace           = "EventStoreDB"
+  period             = 300
+  statistic          = "Average"
+  threshold          = local.alarm_thresholds.disk_usage_critical
+  alarm_description  = "Disk usage is above critical threshold"
+  alarm_actions      = [aws_sns_topic.eventstore_alarms.arn]
+  ok_actions         = [aws_sns_topic.eventstore_alarms.arn]
+
+  dimensions = {
+    InstanceId = aws_instance.eventstore[count.index].id
+    Cluster    = "eventstore"
+    Role       = "eventstoredb"
+  }
+
+  tags = local.common_tags
+}
+
+# Memory Usage Alarm
+resource "aws_cloudwatch_metric_alarm" "memory_usage" {
+  count               = var.cluster_size
+  alarm_name          = "eventstore-memory-usage-${count.index + 1}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "mem_used_percent"
+  namespace           = "EventStoreDB"
+  period             = 300
+  statistic          = "Average"
+  threshold          = local.alarm_thresholds.memory_usage
+  alarm_description  = "Memory usage is above threshold"
+  alarm_actions      = [aws_sns_topic.eventstore_alarms.arn]
+  ok_actions         = [aws_sns_topic.eventstore_alarms.arn]
+
+  dimensions = {
+    InstanceId = aws_instance.eventstore[count.index].id
+    Cluster    = "eventstore"
+    Role       = "eventstoredb"
+  }
+
+  tags = local.common_tags
+}
+
+# CPU Usage Alarm
+resource "aws_cloudwatch_metric_alarm" "cpu_usage" {
+  count               = var.cluster_size
+  alarm_name          = "eventstore-cpu-usage-${count.index + 1}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "cpu_usage_user"
+  namespace           = "EventStoreDB"
+  period             = 300
+  statistic          = "Average"
+  threshold          = local.alarm_thresholds.cpu_usage
+  alarm_description  = "CPU usage is above threshold"
+  alarm_actions      = [aws_sns_topic.eventstore_alarms.arn]
+  ok_actions         = [aws_sns_topic.eventstore_alarms.arn]
+
+  dimensions = {
+    InstanceId = aws_instance.eventstore[count.index].id
+    Cluster    = "eventstore"
+    Role       = "eventstoredb"
+  }
 
   tags = local.common_tags
 }
