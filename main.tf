@@ -71,6 +71,31 @@ variable "slack_webhook_url" {
   default     = null
 }
 
+variable "enable_mtls" {
+  description = "Enable Mutual TLS authentication for EventStoreDB"
+  type        = bool
+  default     = false
+}
+
+variable "mtls_ca_cert" {
+  description = "CA certificate for mTLS authentication (PEM format)"
+  type        = string
+  default     = null
+}
+
+variable "mtls_client_cert" {
+  description = "Client certificate for mTLS authentication (PEM format)"
+  type        = string
+  default     = null
+}
+
+variable "mtls_client_key" {
+  description = "Client private key for mTLS authentication (PEM format)"
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
 # Get available AZs
 data "aws_availability_zones" "available" {
   state = "available"
@@ -112,6 +137,21 @@ locals {
     Role        = "eventstoredb"
     Owner       = var.owner
     ManagedBy   = "terraform"
+  }
+
+  eventstore_config = {
+    EnableExternalTCP = true
+    EnableExternalHTTP = true
+    EnableInternalTCP = true
+    EnableInternalHTTP = true
+    EnableAtomPubOverHTTP = true
+    EnableTrustedAuth = true
+    EnableMutualTLS = var.enable_mtls
+    CertificateFile = "/etc/eventstore/certs/cert.pem"
+    CertificatePrivateKeyFile = "/etc/eventstore/certs/key.pem"
+    TrustedRootCertificatesPath = "/etc/eventstore/certs/ca.pem"
+    ClientCertificateFile = var.enable_mtls ? "/etc/eventstore/certs/client.pem" : null
+    ClientCertificatePrivateKeyFile = var.enable_mtls ? "/etc/eventstore/certs/client-key.pem" : null
   }
 }
 
