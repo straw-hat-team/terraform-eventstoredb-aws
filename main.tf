@@ -29,6 +29,51 @@ variable "gossip_mode" {
   default     = "ip"
 }
 
+variable "ami_id" {
+  description = "Optional: Specific AMI ID to use. If not provided, will use latest Ubuntu 22.04 LTS"
+  type        = string
+  default     = null
+}
+
+variable "availability_zone" {
+  description = "Optional: Specific availability zone to use. If not provided, will use first available AZ"
+  type        = string
+  default     = null
+}
+
+variable "bastion_ips" {
+  description = "List of CIDR blocks for bastion hosts that need access to EventStoreDB admin interface"
+  type        = list(string)
+  default     = []
+}
+
+# Get available AZs
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# Get latest Ubuntu 22.04 LTS AMI if not specified
+data "aws_ami" "ubuntu" {
+  count       = var.ami_id == null ? 1 : 0
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+locals {
+  ami_id = var.ami_id != null ? var.ami_id : data.aws_ami.ubuntu[0].id
+  az     = var.availability_zone != null ? var.availability_zone : data.aws_availability_zones.available.names[0]
+}
+
 # Fetch EventStoreDB config and certs from SSM
 
 data "aws_ssm_parameter" "eventstore_conf" {
@@ -87,7 +132,7 @@ resource "aws_vpc" "eventstore_vpc" {
 resource "aws_subnet" "eventstore_subnet" {
   vpc_id                  = aws_vpc.eventstore_vpc.id
   cidr_block              = "172.28.1.0/24"
-  availability_zone       = "us-east-1a"
+  availability_zone       = local.az
   map_public_ip_on_launch = var.network_type == "public"
 }
 
@@ -95,18 +140,25 @@ resource "aws_security_group" "eventstore_sg" {
   name        = "eventstore-sg"
   vpc_id      = aws_vpc.eventstore_vpc.id
 
-  ingress {
-    from_port   = 2113
-    to_port     = 2113
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
+  # Internal gRPC communication between nodes
   ingress {
     from_port   = 1113
     to_port     = 1113
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [aws_vpc.eventstore_vpc.cidr_block]
+    description = "Internal gRPC communication between EventStoreDB nodes"
+  }
+
+  # Admin interface access
+  ingress {
+    from_port   = 2113
+    to_port     = 2113
+    protocol    = "tcp"
+    cidr_blocks = concat(
+      [aws_vpc.eventstore_vpc.cidr_block],
+      var.bastion_ips
+    )
+    description = "Admin interface access from VPC and bastion hosts"
   }
 
   egress {
@@ -114,6 +166,11 @@ resource "aws_security_group" "eventstore_sg" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
+  }
+
+  tags = {
+    Name = "eventstore-sg"
   }
 }
 
@@ -184,13 +241,18 @@ locals {
 resource "aws_instance" "eventstore" {
   count = var.cluster_size
 
-  ami                         = "ami-xxxxxxxxxxxxxxxxx"
+  ami                         = local.ami_id
   instance_type               = "m6i.large"
   subnet_id                   = aws_subnet.eventstore_subnet.id
   associate_public_ip_address = var.network_type == "public"
   key_name                    = var.key_pair_name
   vpc_security_group_ids      = [aws_security_group.eventstore_sg.id]
   iam_instance_profile        = aws_iam_instance_profile.eventstore_profile.name
+
+  depends_on = [
+    aws_volume_attachment.data_attach[count.index],
+    aws_volume_attachment.index_attach[count.index]
+  ]
 
   root_block_device {
     volume_size = 20
@@ -216,7 +278,7 @@ resource "aws_instance" "eventstore" {
 
 resource "aws_ebs_volume" "data_volume" {
   count             = var.cluster_size
-  availability_zone = "us-east-1a"
+  availability_zone = local.az
   size              = 200
   type              = "gp3"
   iops              = 3000
@@ -228,7 +290,7 @@ resource "aws_ebs_volume" "data_volume" {
 
 resource "aws_ebs_volume" "index_volume" {
   count             = var.cluster_size
-  availability_zone = "us-east-1a"
+  availability_zone = local.az
   size              = 100
   type              = "gp3"
   iops              = 3000

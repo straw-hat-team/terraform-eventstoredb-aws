@@ -36,6 +36,10 @@ EOC
   -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json \
   -s
 
+# Enable and start CloudWatch Agent
+systemctl enable amazon-cloudwatch-agent
+systemctl start amazon-cloudwatch-agent
+
 # Format and mount data volume
 mkfs.ext4 /dev/xvdf
 mkdir -p /var/lib/eventstore/data
