@@ -47,6 +47,18 @@ variable "bastion_ips" {
   default     = []
 }
 
+variable "environment" {
+  description = "Environment name (e.g. dev, staging, prod)"
+  type        = string
+  default     = "dev"
+}
+
+variable "owner" {
+  description = "Owner of the resources (optional)"
+  type        = string
+  default     = null
+}
+
 # Get available AZs
 data "aws_availability_zones" "available" {
   state = "available"
@@ -72,6 +84,14 @@ data "aws_ami" "ubuntu" {
 locals {
   ami_id = var.ami_id != null ? var.ami_id : data.aws_ami.ubuntu[0].id
   az     = var.availability_zone != null ? var.availability_zone : data.aws_availability_zones.available.names[0]
+  
+  common_tags = {
+    Environment = var.environment
+    Cluster     = "eventstore"
+    Role        = "eventstoredb"
+    Owner       = var.owner
+    ManagedBy   = "terraform"
+  }
 }
 
 # Fetch EventStoreDB config and certs from SSM
@@ -124,9 +144,7 @@ resource "aws_route_table_association" "eventstore_rta" {
 
 resource "aws_vpc" "eventstore_vpc" {
   cidr_block = "172.28.0.0/16"
-  tags = {
-    Name = "eventstore-vpc"
-  }
+  tags       = merge(local.common_tags, { Name = "eventstore-vpc" })
 }
 
 resource "aws_subnet" "eventstore_subnet" {
@@ -134,11 +152,13 @@ resource "aws_subnet" "eventstore_subnet" {
   cidr_block              = "172.28.1.0/24"
   availability_zone       = local.az
   map_public_ip_on_launch = var.network_type == "public"
+  tags                    = merge(local.common_tags, { Name = "eventstore-subnet" })
 }
 
 resource "aws_security_group" "eventstore_sg" {
   name        = "eventstore-sg"
   vpc_id      = aws_vpc.eventstore_vpc.id
+  tags        = merge(local.common_tags, { Name = "eventstore-sg" })
 
   # Internal gRPC communication between nodes
   ingress {
@@ -167,10 +187,6 @@ resource "aws_security_group" "eventstore_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
     description = "Allow all outbound traffic"
-  }
-
-  tags = {
-    Name = "eventstore-sg"
   }
 }
 
@@ -259,13 +275,6 @@ resource "aws_instance" "eventstore" {
     volume_type = "gp3"
   }
 
-  tags = {
-    Name        = "eventstore-node-${count.index + 1}"
-    Cluster     = "eventstore"
-    Role        = "eventstoredb"
-    Environment = "dev"
-  }
-
   user_data = templatefile("${path.module}/bootstrap.sh.tpl", {
     node_ip     = var.gossip_mode == "dns" ? "esdb-${count.index + 1}.internal" : aws_instance.eventstore[count.index].private_ip
     peer_ips    = join(",", local.gossip_seeds)
@@ -273,6 +282,11 @@ resource "aws_instance" "eventstore" {
     config_text = data.aws_ssm_parameter.eventstore_conf.value
     cert_text   = data.aws_ssm_parameter.cert_pem.value
     key_text    = data.aws_ssm_parameter.key_pem.value
+    environment = var.environment
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "eventstore-node-${count.index + 1}"
   })
 }
 
@@ -283,9 +297,7 @@ resource "aws_ebs_volume" "data_volume" {
   type              = "gp3"
   iops              = 3000
   throughput        = 125
-  tags = {
-    Name = "eventstore-data-${count.index + 1}"
-  }
+  tags              = merge(local.common_tags, { Name = "eventstore-data-${count.index + 1}" })
 }
 
 resource "aws_ebs_volume" "index_volume" {
@@ -295,9 +307,7 @@ resource "aws_ebs_volume" "index_volume" {
   type              = "gp3"
   iops              = 3000
   throughput        = 125
-  tags = {
-    Name = "eventstore-index-${count.index + 1}"
-  }
+  tags              = merge(local.common_tags, { Name = "eventstore-index-${count.index + 1}" })
 }
 
 resource "aws_volume_attachment" "data_attach" {
@@ -314,14 +324,39 @@ resource "aws_volume_attachment" "index_attach" {
   instance_id = aws_instance.eventstore[count.index].id
 }
 
-# Backup Vault
+# Custom Backup Role
+resource "aws_iam_role" "backup_role" {
+  name = "eventstore-backup-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "backup.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "backup_policy" {
+  role       = aws_iam_role.backup_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+}
 
 resource "aws_backup_vault" "eventstore_backup" {
   name = "eventstore-backup-vault"
+  tags = local.common_tags
 }
 
 resource "aws_backup_plan" "eventstore_plan" {
   name = "eventstore-backup-plan"
+  tags = local.common_tags
 
   rule {
     rule_name         = "daily-snapshots"
@@ -333,17 +368,17 @@ resource "aws_backup_plan" "eventstore_plan" {
   }
 }
 
-data "aws_caller_identity" "current" {}
-
 resource "aws_backup_selection" "eventstore_selection" {
   name         = "eventstore-volumes"
-  iam_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/service-role/AWSBackupDefaultServiceRole"
+  iam_role_arn = aws_iam_role.backup_role.arn
   plan_id      = aws_backup_plan.eventstore_plan.id
 
   resources = concat(
     [for v in aws_ebs_volume.data_volume : v.arn],
     [for v in aws_ebs_volume.index_volume : v.arn]
   )
+
+  tags = local.common_tags
 }
 
 output "cluster_node_ips" {
