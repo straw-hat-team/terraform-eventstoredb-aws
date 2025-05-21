@@ -24,10 +24,10 @@ source "amazon-ebs" "eventstoredb" {
   source_ami      = local.ubuntu_ami
   instance_type   = "t3.medium"
   ssh_username    = "ubuntu"
-  ami_name        = "${var.ami_name}-${timestamp()}"
+  ami_name        = "${var.ami_name}-{{timestamp}}"
   ami_description = "ZFS + EventStoreDB with dynamic config via SSM and CloudWatch"
 
-  ebs_block_device {
+  launch_block_device_mappings {
     device_name           = "/dev/sda1"
     volume_size           = 32
     volume_type           = "gp3"
@@ -35,7 +35,7 @@ source "amazon-ebs" "eventstoredb" {
     encrypted             = true
   }
 
-  ami_tags = {
+  tags = {
     Name   = "eventstoredb-zfs"
     Role   = "eventstoredb"
     Backup = "true"
