@@ -1,0 +1,20 @@
+[Unit]
+Description=EventStoreDB Service
+After=network.target eventstore-bootstrap.service
+Requires=eventstore-bootstrap.service
+
+[Service]
+Type=simple
+User=eventstore
+Group=eventstore
+
+Environment=EVENTSTORE_DB=/var/lib/eventstore/data
+Environment=EVENTSTORE_INDEX=/var/lib/eventstore/index
+Environment=EVENTSTORE_LOG=/var/log/eventstore
+
+ExecStart=/usr/local/bin/eventstoredb
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
