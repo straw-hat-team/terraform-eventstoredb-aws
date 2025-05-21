@@ -16,7 +16,10 @@ variable "ami_name" {
 }
 
 locals {
-  ubuntu_ami = "ami-xxxxxxxxxxxxxxxxx"
+  amazon_owner_id = "099720109477"
+  ubuntu_version = "noble-24.04"
+  architecture = "arm64"
+  virtualization_type = "hvm"
 }
 
 source "amazon-ebs" "eventstoredb" {
@@ -24,12 +27,13 @@ source "amazon-ebs" "eventstoredb" {
 
   source_ami_filter {
     filters = {
-      name                = "ubuntu/images/*ubuntu-jammy-22.04-amd64-server-*"
+      # Example: ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-20250325
+      name                = "ubuntu/images/${local.virtualization_type}-ssd-*/ubuntu-${local.ubuntu_version}-${local.architecture}-server-*"
       root-device-type    = "ebs"
-      virtualization-type = "hvm"
+      virtualization-type = local.virtualization_type
     }
     most_recent = true
-    owners      = ["099720109477"]
+    owners      = [local.amazon_owner_id]
   }
 
   instance_type   = "t2.micro"
