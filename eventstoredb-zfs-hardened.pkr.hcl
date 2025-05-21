@@ -58,20 +58,20 @@ source "amazon-ebs" "eventstoredb" {
 build {
   sources = ["source.amazon-ebs.eventstoredb"]
 
-  provisioner "shell" {
-    inline = [
-      "sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc"
-    ]
-  }
+  # provisioner "shell" {
+  #   inline = [
+  #     "sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc"
+  #   ]
+  # }
+
+  # provisioner "file" {
+  #   source      = "files/cloudwatch-agent.json"
+  #   destination = "/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json"
+  # }
 
   provisioner "file" {
-    source      = "files/cloudwatch-agent.json"
-    destination = "/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json"
-  }
-
-  provisioner "file" {
-    source      = "units/"
-    destination = "/etc/systemd/system/"
+    source      = "units/eventstore-bootstrap.service"
+    destination = "/etc/systemd/system/eventstore-bootstrap.service"
   }
 
   provisioner "file" {
@@ -79,20 +79,21 @@ build {
     destination = "/usr/local/bin/bootstrap.sh"
   }
 
-  provisioner "file" {
-    source      = "scripts/cert-watcher.sh"
-    destination = "/usr/local/bin/cert-watcher.sh"
-  }
+  # provisioner "file" {
+  #   source      = "scripts/cert-watcher.sh"
+  #   destination = "/usr/local/bin/cert-watcher.sh"
+  # }
 
   provisioner "shell" {
     inline = [
-      "chmod +x /usr/local/bin/bootstrap.sh /usr/local/bin/cert-watcher.sh",
+      "chmod +x /usr/local/bin/bootstrap.sh",
+      # "chmod +x /usr/local/bin/cert-watcher.sh",
       "apt-get update && apt-get install -y zfsutils-linux jq amazon-ssm-agent fail2ban unattended-upgrades auditd curl gnupg2",
       "systemctl enable amazon-ssm-agent auditd",
-      "dpkg -i /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json || true",
-      "systemctl enable cloud-init amazon-cloudwatch-agent",
-      "systemctl enable eventstore-bootstrap",
-      "systemctl enable --now eventstore-config-watcher.timer"
+      # "dpkg -i /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json || true",
+      # "systemctl enable cloud-init amazon-cloudwatch-agent",
+      "systemctl enable eventstore-bootstrap"
+      # "systemctl enable --now eventstore-config-watcher.timer"
     ]
   }
 }
