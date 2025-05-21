@@ -1,0 +1,12 @@
+[Unit]
+Description=EventStoreDB Bootstrap
+After=network.target cloud-final.service
+ConditionPathExists=!/etc/eventstore/bootstrapped
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bootstrap.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

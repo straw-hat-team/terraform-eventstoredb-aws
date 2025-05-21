@@ -1,0 +1,10 @@
+[Unit]
+Description=SSM Cert Watcher for EventStore
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/cert-watcher.sh
+Type=oneshot
+
+[Install]
+WantedBy=multi-user.target
