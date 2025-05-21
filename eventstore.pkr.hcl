@@ -14,9 +14,9 @@ variable "cluster_size" {
 }
 
 source "amazon-ebs" "esdb" {
-  region                  = var.aws_region
-  instance_type           = "t3.medium"
-  ami_name                = "eventstore-${var.environment}-{{timestamp}}"
+  region        = var.aws_region
+  instance_type = "t3.medium"
+  ami_name      = "eventstore-${var.environment}-{{timestamp}}"
   source_ami_filter {
     filters = {
       name                = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
@@ -26,7 +26,7 @@ source "amazon-ebs" "esdb" {
     owners      = ["099720109477"]
     most_recent = true
   }
-  ssh_username            = "ubuntu"
+  ssh_username = "ubuntu"
 }
 
 build {

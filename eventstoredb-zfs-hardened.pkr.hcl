@@ -1,3 +1,12 @@
+packer {
+  required_plugins {
+    amazon = {
+      version = ">= 1.3.6"
+      source  = "github.com/hashicorp/amazon"
+    }
+  }
+}
+
 variable "region" {
   default = "us-east-1"
 }
@@ -27,9 +36,9 @@ source "amazon-ebs" "eventstoredb" {
   }
 
   ami_tags = {
-    Name      = "eventstoredb-zfs"
-    Role      = "eventstoredb"
-    Backup    = "true"
+    Name   = "eventstoredb-zfs"
+    Role   = "eventstoredb"
+    Backup = "true"
   }
 
   run_tags = {
