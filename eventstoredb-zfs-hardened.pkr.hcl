@@ -20,6 +20,11 @@ locals {
   ubuntu_version = "noble-24.04"
   architecture = "arm64"
   virtualization_type = "hvm"
+  os_type = "ubuntu"
+  volume_type = "gp3"
+  base_ami_name = "${local.os_type}/images/${local.virtualization_type}-ssd-${local.volume_type}/${local.os_type}-${local.ubuntu_version}-${local.architecture}-server"
+  filesystem_type = "zfs"
+  ami_name = "trogondb/${local.filesystem_type}/${local.base_ami_name}-{{timestamp}}"
 }
 
 source "amazon-ebs" "eventstoredb" {
@@ -27,8 +32,7 @@ source "amazon-ebs" "eventstoredb" {
 
   source_ami_filter {
     filters = {
-      # Example: ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-20250325
-      name                = "ubuntu/images/${local.virtualization_type}-ssd-*/ubuntu-${local.ubuntu_version}-${local.architecture}-server-*"
+      name                = "${local.base_ami_name}-*"
       root-device-type    = "ebs"
       virtualization-type = local.virtualization_type
     }
@@ -38,13 +42,12 @@ source "amazon-ebs" "eventstoredb" {
 
   instance_type   = "t2.micro"
   ssh_username    = "ubuntu"
-  ami_name        = "${var.ami_name}-{{timestamp}}"
-  ami_description = "ZFS + EventStoreDB with dynamic config via SSM and CloudWatch"
+  ami_name        = local.ami_name
 
   launch_block_device_mappings {
+    volume_type           = local.volume_type
     device_name           = "/dev/sda1"
     volume_size           = 32
-    volume_type           = "gp3"
     delete_on_termination = true
     encrypted             = true
   }
