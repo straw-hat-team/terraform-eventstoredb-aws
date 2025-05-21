@@ -7,7 +7,9 @@ packer {
   }
 }
 
-variable "region" {}
+variable "region" {
+  type = string
+}
 
 locals {
   amazon_owner_id = "099720109477"
@@ -48,10 +50,6 @@ source "amazon-ebs" "eventstoredb" {
 
   tags = {
     ManagedBy   = "packer"
-  }
-
-  run_tags = {
-    Name = "packer-builder"
   }
 }
 
