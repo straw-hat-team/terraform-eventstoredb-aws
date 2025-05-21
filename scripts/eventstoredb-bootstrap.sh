@@ -7,16 +7,6 @@ if [ -f /etc/eventstore/bootstrapped ] && [ ! -f /etc/eventstore/force_bootstrap
   exit 0
 fi
 
-# Update package lists
-apt-get update
-
-# Install EventStoreDB
-EVENTSTORE_VERSION="oss-v23.10.5"
-EVENTSTORE_DEB="EventStore-OSS-Linux-${EVENTSTORE_VERSION}.ubuntu-22.04.deb"
-wget -q "https://github.com/kurrent-io/KurrentDB/releases/download/${EVENTSTORE_VERSION}/${EVENTSTORE_DEB}"
-dpkg -i "$EVENTSTORE_DEB"
-rm "$EVENTSTORE_DEB"
-
 # Get AWS region
 # REGION=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
 

@@ -17,14 +17,18 @@ variable "eventstore_version" {
 
 locals {
   amazon_owner_id = "099720109477"
-  ubuntu_version = "noble-24.04"
+  ubuntu_version = "24.04"
+  ubuntu_version_name = "noble-${local.ubuntu_version}"
   architecture = "arm64"
   virtualization_type = "hvm"
   os_type = "ubuntu"
   volume_type = "gp3"
-  base_ami_name = "${local.os_type}/images/${local.virtualization_type}-ssd-${local.volume_type}/${local.os_type}-${local.ubuntu_version}-${local.architecture}-server"
+  base_ami_name = "${local.os_type}/images/${local.virtualization_type}-ssd-${local.volume_type}/${local.os_type}-${local.ubuntu_version_name}-${local.architecture}-server"
   filesystem_type = "zfs"
   ami_name = "trogondb/${var.eventstore_version}/${local.filesystem_type}/${local.base_ami_name}-{{timestamp}}"
+
+  eventstore_deb = "EventStore-OSS-Linux-${var.eventstore_version}.ubuntu-${local.ubuntu_version}.deb"
+  eventstore_deb_url = "https://github.com/kurrent-io/KurrentDB/releases/download/oss-v${var.eventstore_version}/${local.eventstore_deb}"
 }
 
 source "amazon-ebs" "eventstoredb" {
@@ -60,6 +64,15 @@ source "amazon-ebs" "eventstoredb" {
 build {
   sources = ["source.amazon-ebs.eventstoredb"]
 
+  provisioner "shell" {
+    inline = [
+      "sudo apt-get update",
+      "wget -q \"${local.eventstore_deb_url}\"",
+      "sudo dpkg -i \"${local.eventstore_deb}\"",
+      "rm \"${local.eventstore_deb}\""
+    ]
+  }
+
   # provisioner "shell" {
   #   inline = [
   #     "sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc"
@@ -87,15 +100,15 @@ build {
   }
   
   provisioner "file" {
-    source      = "scripts/bootstrap.sh"
-    destination = "/tmp/bootstrap.sh"
+    source      = "scripts/eventstoredb-bootstrap.sh"
+    destination = "/tmp/eventstoredb-bootstrap.sh"
   }
 
   provisioner "shell" {
     inline = [
-      "sudo mv /tmp/bootstrap.sh /usr/local/bin/bootstrap.sh",
-      "sudo chown root:root /usr/local/bin/bootstrap.sh",
-      "sudo chmod +x /usr/local/bin/bootstrap.sh",
+      "sudo mv /tmp/eventstoredb-bootstrap.sh /usr/local/bin/eventstoredb-bootstrap.sh",
+      "sudo chown root:root /usr/local/bin/eventstoredb-bootstrap.sh",
+      "sudo chmod +x /usr/local/bin/eventstoredb-bootstrap.sh",
     ]
   }
 
