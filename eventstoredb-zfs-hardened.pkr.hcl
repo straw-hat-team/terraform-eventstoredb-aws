@@ -47,9 +47,7 @@ source "amazon-ebs" "eventstoredb" {
   }
 
   tags = {
-    Name   = "eventstoredb-${local.filesystem_type}"
-    Role   = "eventstoredb"
-    Backup = "true"
+    ManagedBy   = "packer"
   }
 
   run_tags = {
