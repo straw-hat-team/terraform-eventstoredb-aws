@@ -11,6 +11,10 @@ variable "region" {
   type = string
 }
 
+variable "eventstore_version" {
+  type = string
+}
+
 locals {
   amazon_owner_id = "099720109477"
   ubuntu_version = "noble-24.04"
@@ -20,7 +24,7 @@ locals {
   volume_type = "gp3"
   base_ami_name = "${local.os_type}/images/${local.virtualization_type}-ssd-${local.volume_type}/${local.os_type}-${local.ubuntu_version}-${local.architecture}-server"
   filesystem_type = "zfs"
-  ami_name = "trogondb/${local.filesystem_type}/${local.base_ami_name}-{{timestamp}}"
+  ami_name = "trogondb/${var.eventstore_version}/${local.filesystem_type}/${local.base_ami_name}-{{timestamp}}"
 }
 
 source "amazon-ebs" "eventstoredb" {

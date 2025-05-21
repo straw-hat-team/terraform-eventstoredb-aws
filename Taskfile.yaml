@@ -3,6 +3,7 @@ version: "3"
 env:
   PKR_VAR_region: us-east-2
   PKR_VAR_ami_name: eventstoredb-zfs-hardened
+  PKR_VAR_eventstore_version: "23.10.5"
   AWS_DEFAULT_REGION: us-east-2
 
 tasks:
