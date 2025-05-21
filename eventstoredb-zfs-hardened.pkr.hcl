@@ -60,7 +60,7 @@ build {
 
   provisioner "shell" {
     inline = [
-      "mkdir -p /opt/aws/amazon-cloudwatch-agent/etc"
+      "sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc"
     ]
   }
 
