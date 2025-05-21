@@ -79,14 +79,22 @@ build {
     inline = [
       "chmod +x /tmp/eventstore-bootstrap.service",
       "sudo mv /tmp/eventstore-bootstrap.service /etc/systemd/system/eventstore-bootstrap.service",
-      "chown root:root /etc/systemd/system/eventstore-bootstrap.service",
-      "chmod 644 /etc/systemd/system/eventstore-bootstrap.service",
+      "sudo chown root:root /etc/systemd/system/eventstore-bootstrap.service",
+      "sudo chmod 644 /etc/systemd/system/eventstore-bootstrap.service",
     ]
   }
-
+  
   provisioner "file" {
     source      = "scripts/bootstrap.sh"
-    destination = "/usr/local/bin/bootstrap.sh"
+    destination = "/tmp/bootstrap.sh"
+  }
+
+  provisioner "shell" {
+    inline = [
+      "sudo mv /tmp/bootstrap.sh /usr/local/bin/bootstrap.sh",
+      "sudo chown root:root /usr/local/bin/bootstrap.sh",
+      "sudo chmod +x /usr/local/bin/bootstrap.sh",
+    ]
   }
 
   # provisioner "file" {
@@ -96,13 +104,13 @@ build {
 
   provisioner "shell" {
     inline = [
-      "chmod +x /usr/local/bin/bootstrap.sh",
       # "chmod +x /usr/local/bin/cert-watcher.sh",
-      "apt-get update && apt-get install -y zfsutils-linux jq amazon-ssm-agent fail2ban unattended-upgrades auditd curl gnupg2",
-      "systemctl enable amazon-ssm-agent auditd",
+      "sudo apt-get update",
+      "sudo apt-get install -y zfsutils-linux jq amazon-ssm-agent fail2ban unattended-upgrades auditd curl gnupg2",
+      "sudo systemctl enable amazon-ssm-agent auditd",
       # "dpkg -i /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json || true",
       # "systemctl enable cloud-init amazon-cloudwatch-agent",
-      "systemctl enable eventstore-bootstrap"
+      "sudo systemctl enable eventstore-bootstrap"
       # "systemctl enable --now eventstore-config-watcher.timer"
     ]
   }
