@@ -7,6 +7,9 @@ if [ -f /etc/eventstore/bootstrapped ] && [ ! -f /etc/eventstore/force_bootstrap
   exit 0
 fi
 
+# Update package lists
+apt-get update
+
 # Install EventStoreDB
 EVENTSTORE_VERSION="oss-v23.10.5"
 EVENTSTORE_DEB="EventStore-OSS-Linux-${EVENTSTORE_VERSION}.ubuntu-22.04.deb"
