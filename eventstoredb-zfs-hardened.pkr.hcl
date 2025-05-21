@@ -21,8 +21,18 @@ locals {
 
 source "amazon-ebs" "eventstoredb" {
   region          = var.region
-  source_ami      = local.ubuntu_ami
-  instance_type   = "t3.medium"
+
+  source_ami_filter {
+    filters = {
+      name                = "ubuntu/images/*ubuntu-jammy-22.04-amd64-server-*"
+      root-device-type    = "ebs"
+      virtualization-type = "hvm"
+    }
+    most_recent = true
+    owners      = ["099720109477"]
+  }
+
+  instance_type   = "t2.micro"
   ssh_username    = "ubuntu"
   ami_name        = "${var.ami_name}-{{timestamp}}"
   ami_description = "ZFS + EventStoreDB with dynamic config via SSM and CloudWatch"
