@@ -5,7 +5,7 @@ ConditionPathExists=!/etc/eventstore/bootstrapped
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/bootstrap.sh
+ExecStart=/usr/local/bin/eventstoredb-bootstrap.sh
 RemainAfterExit=yes
 
 [Install]
