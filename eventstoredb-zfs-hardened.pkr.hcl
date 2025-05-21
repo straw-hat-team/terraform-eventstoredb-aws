@@ -106,8 +106,8 @@ build {
     inline = [
       # "chmod +x /usr/local/bin/cert-watcher.sh",
       "sudo apt-get update",
-      "sudo apt-get install -y zfsutils-linux jq amazon-ssm-agent fail2ban unattended-upgrades auditd curl gnupg2",
-      "sudo systemctl enable amazon-ssm-agent auditd",
+      # "sudo apt-get install -y zfsutils-linux jq amazon-ssm-agent fail2ban unattended-upgrades auditd curl gnupg2",
+      # "sudo systemctl enable amazon-ssm-agent auditd",
       # "dpkg -i /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json || true",
       # "systemctl enable cloud-init amazon-cloudwatch-agent",
       "sudo systemctl enable eventstore-bootstrap"
