@@ -9,10 +9,6 @@ packer {
 
 variable "region" {}
 
-variable "ami_name" {
-  default = "eventstoredb-zfs-hardened"
-}
-
 locals {
   amazon_owner_id = "099720109477"
   ubuntu_version = "noble-24.04"
@@ -51,7 +47,7 @@ source "amazon-ebs" "eventstoredb" {
   }
 
   tags = {
-    Name   = "eventstoredb-zfs"
+    Name   = "eventstoredb-${local.filesystem_type}"
     Role   = "eventstoredb"
     Backup = "true"
   }
