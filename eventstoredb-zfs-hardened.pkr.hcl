@@ -34,7 +34,7 @@ source "amazon-ebs" "eventstoredb" {
     owners      = [local.amazon_owner_id]
   }
 
-  instance_type   = "t2.micro"
+  instance_type   = "t3.micro"
   ssh_username    = "ubuntu"
   ami_name        = local.ami_name
 
