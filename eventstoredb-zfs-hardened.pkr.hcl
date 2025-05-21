@@ -7,9 +7,7 @@ packer {
   }
 }
 
-variable "region" {
-  default = "us-east-1"
-}
+variable "region" {}
 
 variable "ami_name" {
   default = "eventstoredb-zfs-hardened"
