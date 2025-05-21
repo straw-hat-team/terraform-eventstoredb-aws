@@ -71,7 +71,17 @@ build {
 
   provisioner "file" {
     source      = "units/eventstore-bootstrap.service"
-    destination = "/etc/systemd/system/eventstore-bootstrap.service"
+    destination = "/tmp/eventstore-bootstrap.service"
+    # destination = "/etc/systemd/system/eventstore-bootstrap.service"
+  }
+
+  provisioner "shell" {
+    inline = [
+      "chmod +x /tmp/eventstore-bootstrap.service",
+      "sudo mv /tmp/eventstore-bootstrap.service /etc/systemd/system/eventstore-bootstrap.service",
+      "chown root:root /etc/systemd/system/eventstore-bootstrap.service",
+      "chmod 644 /etc/systemd/system/eventstore-bootstrap.service",
+    ]
   }
 
   provisioner "file" {
