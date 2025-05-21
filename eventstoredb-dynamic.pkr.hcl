@@ -3,11 +3,11 @@ variable "region" {
 }
 
 variable "ami_name" {
-  default = "eventstoredb-dynamic-hardened"
+  default = "eventstoredb-zfs-hardened"
 }
 
 locals {
-  ubuntu_ami = "ami-xxxxxxxxxxxxxxxxx" # Replace with Ubuntu 22.04 LTS for your region
+  ubuntu_ami = "ami-xxxxxxxxxxxxxxxxx" # Ubuntu 22.04 LTS
 }
 
 source "amazon-ebs" "eventstoredb" {
@@ -16,7 +16,7 @@ source "amazon-ebs" "eventstoredb" {
   instance_type   = "t3.medium"
   ssh_username    = "ubuntu"
   ami_name        = "${var.ami_name}-${timestamp()}"
-  ami_description = "Hardened EventStoreDB AMI with live SSM cert reload, gossip config, and dynamic volume mount"
+  ami_description = "EventStoreDB hardened AMI with ZFS, dynamic SSM config, cert injection, and CloudWatch"
 
   ebs_block_device {
     device_name           = "/dev/sda1"
@@ -27,7 +27,7 @@ source "amazon-ebs" "eventstoredb" {
   }
 
   ami_tags = {
-    Name      = "eventstoredb-dynamic"
+    Name      = "eventstoredb-zfs"
     Role      = "eventstoredb"
     Bootstrap = "enabled"
     Backup    = "true"
@@ -45,9 +45,8 @@ build {
     inline = [
       "set -eux",
 
-      # Basic Hardened OS Setup
       "sudo apt-get update && sudo apt-get upgrade -y",
-      "sudo apt-get install -y curl gnupg2 jq software-properties-common apt-transport-https fail2ban auditd amazon-ssm-agent unattended-upgrades",
+      "sudo apt-get install -y curl gnupg2 jq zfsutils-linux software-properties-common apt-transport-https fail2ban auditd amazon-ssm-agent unattended-upgrades",
 
       "sudo systemctl enable amazon-ssm-agent && sudo systemctl start amazon-ssm-agent",
       "sudo systemctl enable auditd && sudo systemctl start auditd",
@@ -56,7 +55,6 @@ build {
       "sudo sed -i 's/^PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config",
       "sudo systemctl restart sshd",
 
-      # Install CloudWatch Agent
       "wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb",
       "sudo dpkg -i amazon-cloudwatch-agent.deb && rm amazon-cloudwatch-agent.deb",
       "sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc",
@@ -82,16 +80,22 @@ build {
 EOF",
       "sudo systemctl enable amazon-cloudwatch-agent && sudo systemctl start amazon-cloudwatch-agent",
 
-      # Install EventStoreDB
       "wget -qO - https://packages.eventstore.com/api/gpg/key/public | sudo apt-key add -",
       "echo 'deb https://packages.eventstore.com/deb/ubuntu jammy main' | sudo tee /etc/apt/sources.list.d/eventstore.list",
       "sudo apt-get update && sudo apt-get install -y eventstore-oss",
       "sudo mkdir -p /etc/systemd/system/eventstore.service.d",
-      "echo -e '[Service]\\nRestart=always\\nRestartSec=5' | sudo tee /etc/systemd/system/eventstore.service.d/override.conf",
+      "cat <<EOF | sudo tee /etc/systemd/system/eventstore.service.d/override.conf
+[Unit]
+After=zfs-mount.service
+Requires=zfs-mount.service
+
+[Service]
+Restart=always
+RestartSec=5
+EOF",
       "sudo systemctl daemon-reexec && sudo systemctl daemon-reload",
       "sudo systemctl disable eventstore",
 
-      # Bootstrap Script
       "cat <<'EOF' | sudo tee /usr/local/bin/eventstore-bootstrap.sh && sudo chmod +x /usr/local/bin/eventstore-bootstrap.sh
 #!/bin/bash
 set -eux
@@ -102,16 +106,21 @@ if [ -f /etc/eventstore/bootstrapped ] && [ ! -f /etc/eventstore/force_bootstrap
 fi
 
 REGION=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
-
-mkdir -p /var/log/eventstore /var/lib/eventstore
-chown -R eventstore:eventstore /var/log/eventstore /var/lib/eventstore
+mkdir -p /var/log/eventstore
+chown -R eventstore:eventstore /var/log/eventstore
 
 DATA_DEV=$(lsblk -o NAME,MOUNTPOINT | grep -E '^nvme[0-9]n1[ ]*$' | awk '{print "/dev/" $1}' || true)
 if [ -n "$DATA_DEV" ]; then
-  mkfs -t ext4 $DATA_DEV || true
-  mkdir -p /var/lib/eventstore
-  echo "$DATA_DEV /var/lib/eventstore ext4 defaults,nofail 0 2" >> /etc/fstab
-  mount -a
+  if ! zpool list | grep -q espool; then
+    zpool create -f espool "$DATA_DEV"
+    zfs set mountpoint=/var/lib/eventstore espool
+    zfs set compression=off espool
+    zfs set atime=off espool
+    zfs set recordsize=128K espool
+  else
+    zpool import espool || true
+    zfs mount espool || true
+  fi
   chown -R eventstore:eventstore /var/lib/eventstore
 fi
 
@@ -127,7 +136,7 @@ fi
 cat <<CONFIG > /etc/eventstore/eventstore.conf
 Log: /var/log/eventstore
 Db: /var/lib/eventstore
-ClusterSize: 3
+ClusterSize: 1
 DiscoverViaDns: ${GOSSIP_MODE:-ip}
 EnableAtomPubOverHttp: true
 CertificateFile: /etc/eventstore/ssl.pem
@@ -143,7 +152,6 @@ systemctl enable eventstore
 reboot
 EOF",
 
-      # Bootstrap service
       "cat <<'EOF' | sudo tee /etc/systemd/system/eventstore-bootstrap.service
 [Unit]
 Description=EventStoreDB Bootstrap
@@ -160,7 +168,6 @@ WantedBy=multi-user.target
 EOF",
       "sudo systemctl daemon-reload && sudo systemctl enable eventstore-bootstrap",
 
-      # Live Cert Reload Watcher
       "cat <<'EOF' | sudo tee /usr/local/bin/eventstore-ssm-watcher.sh && sudo chmod +x /usr/local/bin/eventstore-ssm-watcher.sh
 #!/bin/bash
 set -euo pipefail
@@ -206,8 +213,7 @@ EOF",
       "sudo systemctl daemon-reload",
       "sudo systemctl enable --now eventstore-config-watcher.timer",
 
-      # MOTD
-      "echo 'EventStoreDB Hardened AMI with dynamic config. Managed by Packer.' | sudo tee /etc/motd"
+      "echo 'EventStoreDB Hardened AMI with ZFS. Managed by Packer.' | sudo tee /etc/motd"
     ]
   }
 }
